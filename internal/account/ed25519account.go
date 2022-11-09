@@ -6,9 +6,18 @@ import (
 	"fmt"
 )
 
+const Ed25519AccountType = "ed25519"
+
 type Ed25519Account struct {
 	privateKey ed25519.PrivateKey
 	publicKey  ed25519.PublicKey
+}
+
+func NewEd25519AccountFromPublicKey(publicKey []byte) *Ed25519Account {
+	return &Ed25519Account{
+		privateKey: nil,
+		publicKey:  ed25519.PublicKey(publicKey),
+	}
 }
 
 func NewEd25519Account() *Ed25519Account {
@@ -20,6 +29,14 @@ func NewEd25519Account() *Ed25519Account {
 		privateKey: privateKey,
 		publicKey:  publicKey,
 	}
+}
+
+func (account *Ed25519Account) Type() []byte {
+	return []byte(Ed25519AccountType)
+}
+
+func (account *Ed25519Account) PublicKey() []byte {
+	return account.publicKey
 }
 
 func (account *Ed25519Account) Sign(payload []byte) []byte {

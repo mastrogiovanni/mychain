@@ -8,8 +8,10 @@ import (
 	"io"
 	"log"
 	mrand "math/rand"
+	"sync"
 
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	ma "github.com/multiformats/go-multiaddr"
 
 	"github.com/libp2p/go-libp2p/p2p/discovery/mdns"
 
@@ -29,16 +31,17 @@ type NodeMessage struct {
 }
 
 type Node struct {
-	networkId    string
-	privateKey   crypto.PrivKey
-	publicKey    crypto.PubKey
-	host         host.Host
-	topic        *pubsub.Topic
-	pubSub       *pubsub.PubSub
-	subscription *pubsub.Subscription
-	context      context.Context
-	messages     chan *NodeMessage
-	self         peer.ID
+	networkId      string
+	privateKey     crypto.PrivKey
+	publicKey      crypto.PubKey
+	host           host.Host
+	topic          *pubsub.Topic
+	pubSub         *pubsub.PubSub
+	subscription   *pubsub.Subscription
+	context        context.Context
+	messages       chan *NodeMessage
+	self           peer.ID
+	bootstrapPeers []ma.Multiaddr
 }
 
 func NewNode(insecure bool, randseed int64, networkId string) *Node {
@@ -73,16 +76,25 @@ func NewNode(insecure bool, randseed int64, networkId string) *Node {
 	}
 
 	return &Node{
-		privateKey: privKey,
-		publicKey:  pubKey,
-		host:       host,
-		networkId:  networkId,
+		privateKey:     privKey,
+		publicKey:      pubKey,
+		host:           host,
+		networkId:      networkId,
+		bootstrapPeers: make([]ma.Multiaddr, 0),
 	}
 
 }
 
+func (n *Node) AddBootstrapPeer(value string) error {
+	addr, err := ma.NewMultiaddr(value)
+	if err != nil {
+		return err
+	}
+	n.bootstrapPeers = append(n.bootstrapPeers, addr)
+	return nil
+}
+
 func (n *Node) Close() {
-	n.subscription.Cancel()
 	n.host.Close()
 }
 
@@ -170,6 +182,23 @@ func (n *Node) joinChatRoom(ctx context.Context) {
 }
 
 func (n *Node) Run(ctx context.Context) {
+
+	// Let's connect to the bootstrap nodes first. They will tell us about the
+	// other nodes in the network.
+	var wg sync.WaitGroup
+	for _, peerAddr := range n.bootstrapPeers {
+		peerinfo, _ := peer.AddrInfoFromP2pAddr(peerAddr)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := n.host.Connect(ctx, *peerinfo); err != nil {
+				log.Println(err)
+			} else {
+				log.Println("Connection established with bootstrap node:", *peerinfo)
+			}
+		}()
+	}
+	wg.Wait()
 
 	// create a new PubSub service using the GossipSub router
 	pubSub, err := pubsub.NewGossipSub(ctx, n.host)

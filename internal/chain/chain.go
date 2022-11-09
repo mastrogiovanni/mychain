@@ -29,11 +29,19 @@ func NewChain(acc account.Account) *Chain {
 			Sequence:     0,
 			Payload:      genesisMessage,
 			Signature:    acc.Sign(genesisMessage),
+			Account: account.GenericAccount{
+				Type:      acc.Type(),
+				PublicKey: acc.PublicKey(),
+			},
 		},
 	}
 
 	chain.blocks[string(chain.genesys.Signature)] = chain.genesys
 	return chain
+}
+
+func CreateGenesys() {
+
 }
 
 func (c *Chain) Blocks() []*Block {
@@ -83,12 +91,16 @@ func (c *Chain) NewBlock(prevBlockIds [][]byte, payload []byte, acc account.Acco
 		Sequence:     sequence + 1,
 		Payload:      payload,
 		Signature:    signature,
+		Account: account.GenericAccount{
+			Type:      acc.Type(),
+			PublicKey: acc.PublicKey(),
+		},
 	}
 	c.blocks[string(signature)] = block
 	return block, nil
 }
 
-func (c *Chain) Verify(block *Block, acc account.Account) (bool, error) {
+func (c *Chain) Verify(block *Block) (bool, error) {
 	var buffer bytes.Buffer
 	for _, blockId := range block.PrevBlockIds {
 		block, ok := c.blocks[string(blockId)]
@@ -98,5 +110,9 @@ func (c *Chain) Verify(block *Block, acc account.Account) (bool, error) {
 		buffer.Write(block.Signature)
 	}
 	buffer.Write(block.Payload)
+	acc, err := account.GetAccountFromPublicKey(string(block.Account.Type), block.Account.PublicKey)
+	if err != nil {
+		return false, err
+	}
 	return acc.Verify(buffer.Bytes(), block.Signature), nil
 }

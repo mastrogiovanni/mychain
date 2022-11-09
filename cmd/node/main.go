@@ -22,6 +22,8 @@ func main() {
 	n := node.NewNode(false, 0, "stocazzo")
 	defer n.Close()
 
+	// n.AddBootstrapPeer("/ip4/0.0.0.0/tcp/4001/p2p/QmSCZSKzvwR5QgoPzMuLNYo7cZ5eontQgybHj8hAmDYbBR")
+
 	n.Run(ctx)
 
 	if *senderFlag {
@@ -29,13 +31,14 @@ func main() {
 		for {
 			peers := n.ListPeers()
 			log.Println("Peers:", peers)
-			if len(peers) > 0 {
+			if len(peers) > 1 {
 				break
 			}
 			time.Sleep(1 * time.Second)
 		}
 
 		log.Println("Sending...")
+		// time.Sleep(5 * time.Second)
 		err := n.Publish("Stocazzo sono io!!!!")
 		if err != nil {
 			panic(err)

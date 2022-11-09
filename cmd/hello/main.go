@@ -54,8 +54,10 @@ func main() {
 	}
 
 	for _, block := range pool {
-		ok, err := ch.Verify(block, acc)
+		ok, err := ch.Verify(block)
 		if err != nil {
+			log.Printf("Block: %s", block.String())
+			log.Println(err)
 			panic(err)
 		}
 		log.Printf("%s => %v", hex.EncodeToString(block.Signature), ok)
