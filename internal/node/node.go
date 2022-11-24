@@ -3,17 +3,12 @@ package node
 import (
 	"context"
 	"crypto/rand"
-	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	mrand "math/rand"
-	"sync"
+	"strings"
 
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
-	ma "github.com/multiformats/go-multiaddr"
-
-	"github.com/libp2p/go-libp2p/p2p/discovery/mdns"
 
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/crypto"
@@ -21,97 +16,153 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
-// ChatRoomBufSize is the number of incoming messages to buffer for each topic.
+// NodeMessagesQueueSize is the number of incoming messages to buffer for each topic.
 const NodeMessagesQueueSize = 128
 
-// NodeMessage gets converted to/from JSON and sent in the body of pubsub messages.
-type NodeMessage struct {
-	Message  string
-	SenderID string
-}
-
 type Node struct {
-	networkId      string
-	privateKey     crypto.PrivKey
-	publicKey      crypto.PubKey
-	host           host.Host
-	topic          *pubsub.Topic
-	pubSub         *pubsub.PubSub
-	subscription   *pubsub.Subscription
-	context        context.Context
-	messages       chan *NodeMessage
-	self           peer.ID
-	bootstrapPeers []ma.Multiaddr
+	networkId    string
+	privateKey   crypto.PrivKey
+	publicKey    crypto.PubKey
+	host         host.Host
+	topic        *pubsub.Topic
+	pubSub       *pubsub.PubSub
+	subscription *pubsub.Subscription
+	messages     chan *pubsub.Message
+	self         peer.ID
+	context      context.Context
+	cancel       context.CancelFunc
 }
 
-func NewNode(insecure bool, randseed int64, networkId string) *Node {
+type NodeOpt func(*Node) error
 
-	var r io.Reader
-	if randseed == 0 {
-		r = rand.Reader
-	} else {
-		r = mrand.New(mrand.NewSource(randseed))
+func WithSeed(seed int64) NodeOpt {
+	return func(n *Node) error {
+		r := mrand.New(mrand.NewSource(seed))
+		privKey, pubKey, err := crypto.GenerateKeyPairWithReader(crypto.RSA, 2048, r)
+		if err != nil {
+			return err
+		}
+		n.privateKey = privKey
+		n.publicKey = pubKey
+		return nil
+	}
+}
+
+func WithNetworkId(networkId string) NodeOpt {
+	return func(n *Node) error {
+		n.networkId = networkId
+		return nil
+	}
+}
+
+func NewNode(opts ...NodeOpt) (*Node, error) {
+	node := &Node{}
+
+	// Load options
+	for _, opt := range opts {
+		err := opt(node)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	// Generate a key pair for this host. We will use it at least
-	// to obtain a valid host ID.
-	privKey, pubKey, err := crypto.GenerateKeyPairWithReader(crypto.RSA, 2048, r)
-	if err != nil {
-		panic(err)
+	// Default values
+	if node.networkId == "" {
+		node.networkId = "default-netowork-id"
+	}
+	if node.privateKey == nil || node.publicKey == nil {
+		// Generate a key pair for this host. We will use it at least
+		// to obtain a valid host ID.
+		privKey, pubKey, err := crypto.GenerateKeyPairWithReader(crypto.RSA, 2048, rand.Reader)
+		if err != nil {
+			return nil, err
+		}
+		node.privateKey = privKey
+		node.publicKey = pubKey
 	}
 
-	opts := []libp2p.Option{
+	// Create Host
+	host, err := libp2p.New(
 		libp2p.ListenAddrStrings("/ip4/0.0.0.0/tcp/0"),
-		libp2p.Identity(privKey),
-		libp2p.DisableRelay(),
-	}
-
-	if insecure {
-		opts = append(opts, libp2p.NoSecurity)
-	}
-
-	host, err := libp2p.New(opts...)
+		libp2p.Identity(node.privateKey),
+	)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
+	node.host = host
+	node.self = node.host.ID()
 
-	return &Node{
-		privateKey:     privKey,
-		publicKey:      pubKey,
-		host:           host,
-		networkId:      networkId,
-		bootstrapPeers: make([]ma.Multiaddr, 0),
-	}
-
+	return node, nil
 }
 
-func (n *Node) AddBootstrapPeer(value string) error {
-	addr, err := ma.NewMultiaddr(value)
+func (n *Node) ID() peer.ID {
+	return n.self
+}
+
+func (n *Node) Start(parentCtx context.Context, opts ...pubsub.Option) error {
+
+	ctx, cancel := context.WithCancel(parentCtx)
+	n.cancel = cancel
+	n.context = ctx
+
+	switch {
+	case len(opts) == 1:
+		pubSub, err := pubsub.NewGossipSub(n.context, n.host, opts[0])
+		if err != nil {
+			return err
+		}
+		n.pubSub = pubSub
+	case len(opts) == 0:
+		pubSub, err := pubsub.NewGossipSub(n.context, n.host)
+		if err != nil {
+			return err
+		}
+		n.pubSub = pubSub
+	default:
+		return fmt.Errorf("you can specify at most one option")
+	}
+
+	// // setup local mDNS discovery
+	// if err := n.setupDiscovery(); err != nil {
+	// 	panic(err)
+	// }
+
+	n.messages = make(chan *pubsub.Message, NodeMessagesQueueSize)
+
+	topic, err := n.pubSub.Join(n.networkId)
 	if err != nil {
 		return err
 	}
-	n.bootstrapPeers = append(n.bootstrapPeers, addr)
-	return nil
-}
+	n.topic = topic
 
-func (n *Node) Close() {
-	n.host.Close()
-}
-
-func (n *Node) HandlePeerFound(pi peer.AddrInfo) {
-	log.Printf("discovered new peer %s\n", pi.ID.Pretty())
-	err := n.host.Connect(context.Background(), pi)
+	n.subscription, err = n.topic.Subscribe()
 	if err != nil {
-		fmt.Printf("error connecting to peer %s: %s\n", pi.ID.Pretty(), err)
+		return err
 	}
+
+	go n.readLoop()
+
+	return nil
+
 }
 
-// setupDiscovery creates an mDNS discovery service and attaches it to the libp2p Host.
-// This lets us automatically discover peers on the same LAN and connect to them.
-func (n *Node) setupDiscovery() error {
-	// setup mDNS discovery to find local peers
-	s := mdns.NewMdnsService(n.host, n.networkId, n)
-	return s.Start()
+func (n *Node) Stop() {
+	n.subscription.Cancel()
+	n.topic.Close()
+	n.host.Close()
+	n.cancel()
+}
+
+func (n *Node) GetMessages() chan *pubsub.Message {
+	return n.messages
+}
+
+func (n *Node) Connect(address string) error {
+	addr, err := peer.AddrInfoFromString(address)
+	if err != nil {
+		return err
+	}
+	return n.host.Connect(n.context, *addr)
 }
 
 // readLoop pulls messages from the pubsub topic and pushes them onto the Messages channel.
@@ -120,6 +171,7 @@ func (n *Node) readLoop() {
 	for {
 		msg, err := n.subscription.Next(n.context)
 		if err != nil {
+			log.Println(err)
 			close(n.messages)
 			return
 		}
@@ -127,95 +179,91 @@ func (n *Node) readLoop() {
 		if msg.ReceivedFrom == n.self {
 			continue
 		}
-		cm := new(NodeMessage)
-		err = json.Unmarshal(msg.Data, cm)
-		if err != nil {
-			continue
-		}
 		// send valid messages onto the Messages channel
-		log.Printf("Received msg: %+v", cm)
-		n.messages <- cm
+		// log.Printf("Received msg: %+v", cm)
+		n.messages <- msg
 	}
 }
 
 // Publish sends a message to the pubsub topic.
-func (n *Node) Publish(message string) error {
-	m := NodeMessage{
-		Message:  message,
-		SenderID: n.self.Pretty(),
-	}
-	msgBytes, err := json.Marshal(m)
-	if err != nil {
-		return err
-	}
-	log.Printf("Sending: %s", string(msgBytes))
-	return n.topic.Publish(n.context, msgBytes)
+func (n *Node) Broadcast(data []byte) error {
+	n.topic.Relay()
+	return n.topic.Publish(n.context, data)
 }
 
 func (n *Node) ListPeers() []peer.ID {
 	return n.pubSub.ListPeers(n.networkId)
 }
 
-func (n *Node) joinChatRoom(ctx context.Context) {
-
-	// join the pubsub topic
-	topic, err := n.pubSub.Join(n.networkId)
-	if err != nil {
-		panic(err)
+func (n *Node) DumpAddresses() {
+	for _, addr := range n.Addresses() {
+		if !strings.Contains(addr, "127.0.0.1") {
+			log.Printf("Listen: %s", addr)
+		}
 	}
-	n.topic = topic
-
-	log.Println("Joining network:", n.networkId)
-
-	// and subscribe to it
-	sub, err := n.topic.Subscribe()
-	if err != nil {
-		panic(err)
-	}
-
-	n.subscription = sub
-	n.self = n.host.ID()
-
-	log.Printf("Host ID: %v", n.self)
-	go n.readLoop()
-
 }
 
-func (n *Node) Run(ctx context.Context) {
-
-	// Let's connect to the bootstrap nodes first. They will tell us about the
-	// other nodes in the network.
-	var wg sync.WaitGroup
-	for _, peerAddr := range n.bootstrapPeers {
-		peerinfo, _ := peer.AddrInfoFromP2pAddr(peerAddr)
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if err := n.host.Connect(ctx, *peerinfo); err != nil {
-				log.Println(err)
-			} else {
-				log.Println("Connection established with bootstrap node:", *peerinfo)
-			}
-		}()
+func (n *Node) Addresses() []string {
+	list := make([]string, 0)
+	for _, addr := range n.host.Addrs() {
+		if !strings.Contains(addr.String(), "127.0.0.1") {
+			// log.Printf("Addr: %s/p2p/%s", addr.String(), n.host.ID().String())
+			list = append(list, fmt.Sprintf("%s/p2p/%s", addr.String(), n.host.ID().String()))
+		}
 	}
-	wg.Wait()
-
-	// create a new PubSub service using the GossipSub router
-	pubSub, err := pubsub.NewGossipSub(ctx, n.host)
-	if err != nil {
-		panic(err)
-	}
-	n.pubSub = pubSub
-
-	// setup local mDNS discovery
-	if err := n.setupDiscovery(); err != nil {
-		panic(err)
-	}
-
-	n.context = ctx
-	n.messages = make(chan *NodeMessage, NodeMessagesQueueSize)
-
-	// join the chat room
-	n.joinChatRoom(ctx)
-
+	return list
 }
+
+// func (n *Node) joinChatRoom(ctx context.Context) {
+
+// 	// join the pubsub topic
+// 	topic, err := n.pubSub.Join(n.networkId)
+// 	if err != nil {
+// 		panic(err)
+// 	}
+// 	n.topic = topic
+
+// 	log.Println("Joining network:", n.networkId)
+
+// 	// and subscribe to it
+// 	sub, err := n.topic.Subscribe()
+// 	if err != nil {
+// 		panic(err)
+// 	}
+
+// 	n.subscription = sub
+// 	n.self = n.host.ID()
+
+// 	log.Printf("Host ID: %v", n.self)
+// 	go n.readLoop()
+
+// }
+
+// func (n *Node) HandlePeerFound(pi peer.AddrInfo) {
+// 	log.Printf("discovered new peer %s\n", pi.ID.Pretty())
+// 	err := n.host.Connect(context.Background(), pi)
+// 	if err != nil {
+// 		fmt.Printf("error connecting to peer %s: %s\n", pi.ID.Pretty(), err)
+// 	}
+// }
+
+// // setupDiscovery creates an mDNS discovery service and attaches it to the libp2p Host.
+// // This lets us automatically discover peers on the same LAN and connect to them.
+// func (n *Node) setupDiscovery() error {
+
+// 	ctx := context.Background()
+
+// 	kademliaDHT, err := dht.New(ctx, n.host)
+// 	if err != nil {
+// 		panic(err)
+// 	}
+
+// 	// Bootstrap the DHT. In the default configuration, this spawns a Background
+// 	// thread that will refresh the peer table every five minutes.
+// 	log.Println("Bootstrapping the DHT")
+// 	return kademliaDHT.Bootstrap(ctx)
+
+// 	// // setup mDNS discovery to find local peers
+// 	// s := mdns.NewMdnsService(n.host, n.networkId, n)
+// 	// return s.Start()
+// }
