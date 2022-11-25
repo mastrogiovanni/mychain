@@ -1,37 +1,39 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
+	"log"
 	mrand "math/rand"
 	"os"
+	"strings"
 
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/crypto"
 
-	dht "github.com/libp2p/go-libp2p-kad-dht"
-	"github.com/multiformats/go-multiaddr"
+	"github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/relay"
+	"github.com/libp2p/go-libp2p/p2p/protocol/holepunch"
 )
 
+type tracer struct{}
+
+func (tracer) Trace(evt *holepunch.Event) {
+	fmt.Printf("%+v\n", evt)
+}
+
 func main() {
+
 	help := flag.Bool("help", false, "Display Help")
-	listenHost := flag.String("host", "0.0.0.0", "The bootstrap node host listen address\n")
-	port := flag.Int("port", 4001, "The bootstrap node listen port")
-	insecure := flag.Bool("insercure", false, "If connection is insecure")
+
 	flag.Parse()
 
 	if *help {
 		fmt.Printf("This is a simple bootstrap node for kad-dht application using libp2p\n\n")
 		fmt.Printf("Usage: \n   Run './bootnode'\nor Run './bootnode -host [host] -port [port]'\n")
-
 		os.Exit(0)
 	}
 
-	fmt.Printf("[*] Listening on: %s with port: %d\n", *listenHost, *port)
-
-	ctx := context.Background()
-	r := mrand.New(mrand.NewSource(int64(*port)))
+	r := mrand.New(mrand.NewSource(42))
 
 	// Creates a new RSA key pair for this host.
 	prvKey, _, err := crypto.GenerateKeyPairWithReader(crypto.RSA, 2048, r)
@@ -39,32 +41,28 @@ func main() {
 		panic(err)
 	}
 
-	// 0.0.0.0 will listen on any interface device.
-	sourceMultiAddr, _ := multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/%s/tcp/%d", *listenHost, *port))
-
-	// libp2p.New constructs a new libp2p Host.
-	// Other options can be added here.
-	opts := []libp2p.Option{
-		libp2p.ListenAddrs(sourceMultiAddr),
+	t := tracer{}
+	host, err := libp2p.New(
+		libp2p.ListenAddrStrings("/ip4/0.0.0.0/tcp/0"),
 		libp2p.Identity(prvKey),
-	}
-
-	if *insecure {
-		opts = append(opts, libp2p.NoSecurity)
-	}
-
-	host, err := libp2p.New(opts...)
-
+		libp2p.EnableRelay(),
+		libp2p.EnableHolePunching(holepunch.WithTracer(t)),
+	)
 	if err != nil {
 		panic(err)
 	}
-
-	_, err = dht.New(ctx, host)
+	_, err = relay.New(host)
 	if err != nil {
+		log.Printf("Failed to instantiate the relay: %v", err)
 		panic(err)
 	}
-	fmt.Println("")
-	fmt.Printf("[*] Your Bootstrap ID Is: /ip4/%s/tcp/%v/p2p/%s\n", *listenHost, *port, host.ID().Pretty())
-	fmt.Println("")
+
+	for _, addr := range host.Addrs() {
+		if !strings.Contains(addr.String(), "127.0.0.1") {
+			fmt.Printf("%s/p2p/%s\n", addr.String(), host.ID())
+		}
+	}
+
 	select {}
+
 }
