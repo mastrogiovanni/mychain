@@ -18,6 +18,15 @@ type Block struct {
 	Signature    []byte                 // Signature of prev blocks signature + current payload. Blocks are ordered by address = signature
 }
 
+func NewBlock(data []byte) (*Block, error) {
+	block := &Block{}
+	err := block.Deserialize(data)
+	if err != nil {
+		return nil, err
+	}
+	return block, nil
+}
+
 func (block *Block) Serialize() ([]byte, error) {
 	var b bytes.Buffer
 	writer := bufio.NewWriter(&b)

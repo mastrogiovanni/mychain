@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"math/rand"
 	"sort"
 
 	"github.com/mastrogiovanni/mychain/internal/account"
@@ -14,8 +15,9 @@ var (
 )
 
 type Chain struct {
-	genesys *Block
-	blocks  map[string]*Block
+	genesys  *Block
+	blocks   map[string]*Block
+	snapshot []*Block
 }
 
 func NewChain(acc account.Account, genesys []byte) *Chain {
@@ -24,8 +26,16 @@ func NewChain(acc account.Account, genesys []byte) *Chain {
 		blocks:  make(map[string]*Block),
 		genesys: genesysBlock,
 	}
-	chain.blocks[string(chain.genesys.Signature)] = chain.genesys
+	chain.appendBlockNoCheck(genesysBlock)
 	return chain
+}
+
+func (chain *Chain) appendBlockNoCheck(block *Block) {
+	_, ok := chain.blocks[string(block.Signature)]
+	if !ok {
+		chain.blocks[string(block.Signature)] = block
+		chain.snapshot = append(chain.snapshot, block)
+	}
 }
 
 func newGenesysBlock(acc account.Account, genesys []byte) *Block {
@@ -101,12 +111,24 @@ func (c *Chain) NewBlock(prevBlockIds [][]byte, payload []byte, acc account.Acco
 			PublicKey: acc.PublicKey(),
 		},
 	}
-	c.blocks[string(signature)] = block
+	c.appendBlockNoCheck(block)
 	return block, nil
+}
+
+func (c *Chain) GetOneOfLastBlocksAtRandom(length int) *Block {
+	if length > c.Size() {
+		return c.snapshot[len(c.snapshot)-rand.Intn(c.Size())-1]
+	} else {
+		return c.snapshot[len(c.snapshot)-rand.Intn(length)-1]
+	}
 }
 
 func (c *Chain) Size() int {
 	return len(c.blocks)
+}
+
+func (c *Chain) Snapshot() []*Block {
+	return c.snapshot
 }
 
 func (c *Chain) Append(block *Block) error {
@@ -117,7 +139,7 @@ func (c *Chain) Append(block *Block) error {
 	if !ok {
 		return fmt.Errorf("block not signed correctly")
 	}
-	c.blocks[string(block.Signature)] = block
+	c.appendBlockNoCheck(block)
 	return nil
 }
 

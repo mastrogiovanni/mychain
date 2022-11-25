@@ -8,6 +8,8 @@ import (
 	mrand "math/rand"
 	"strings"
 
+	"github.com/libp2p/go-libp2p-core/network"
+	"github.com/libp2p/go-libp2p-core/protocol"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 
 	"github.com/libp2p/go-libp2p"
@@ -155,6 +157,18 @@ func (n *Node) Stop() {
 
 func (n *Node) GetMessages() chan *pubsub.Message {
 	return n.messages
+}
+
+func (n *Node) GetPeers() []peer.ID {
+	return n.pubSub.ListPeers(n.networkId)
+}
+
+func (n *Node) NewStream(p peer.ID, pids protocol.ID) (network.Stream, error) {
+	return n.host.NewStream(n.context, p, pids)
+}
+
+func (n *Node) SetStreamHandler(pid protocol.ID, handler network.StreamHandler) {
+	n.host.SetStreamHandler(pid, handler)
 }
 
 func (n *Node) Connect(address string) error {

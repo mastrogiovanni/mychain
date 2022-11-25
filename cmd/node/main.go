@@ -5,10 +5,11 @@ import (
 	"encoding/hex"
 	"flag"
 	"log"
-	"math/rand"
 	"strings"
 	"time"
 
+	"github.com/libp2p/go-libp2p-core/network"
+	"github.com/libp2p/go-msgio"
 	"github.com/mastrogiovanni/mychain/internal/account"
 	"github.com/mastrogiovanni/mychain/internal/chain"
 	"github.com/mastrogiovanni/mychain/internal/node"
@@ -63,22 +64,32 @@ func NewMyChainNode(config *Config) *MyChainNode {
 
 	// Create physical layer
 	node, err := node.NewNode(
-		node.WithNetworkId("test-node"),
+		node.WithNetworkId("/utxo/protocol/0.0.1"),
 	)
 	if err != nil {
 		panic(err)
 	}
 	n.node = node
 
+	n.node.SetStreamHandler("/snapshot/0.0.1", func(stream network.Stream) {
+		log.Println("Preparing to send snapshot")
+		writer := msgio.NewWriter(stream)
+		for _, block := range n.chain.Snapshot() {
+			log.Printf("Sending: %s", hex.EncodeToString(block.Signature))
+			data, err := block.Serialize()
+			if err != nil {
+				log.Printf("Impossible to upload snapshot's block (%s): %s", hex.EncodeToString(block.Signature), err)
+				continue
+			}
+			writer.WriteMsg(data)
+		}
+		stream.Close()
+	})
+
 	err = node.Start(ctx)
 	if err != nil {
 		panic(err)
 	}
-
-	// Pool of blocks
-	pool := make([]*chain.Block, 0)
-	genesis := n.chain.Genesis()
-	pool = append(pool, genesis)
 
 	// Connection to peers
 	if len(peers) > 0 {
@@ -92,6 +103,37 @@ func NewMyChainNode(config *Config) *MyChainNode {
 				log.Println("connected to", addr)
 			}
 		}
+	}
+
+	time.Sleep(5 * time.Second)
+
+	// Start download snapshot
+	for _, peerID := range n.node.GetPeers() {
+		log.Println("Start downloading snapshot from:", peerID)
+		stream, err := n.node.NewStream(peerID, "/snapshot/0.0.1")
+		if err != nil {
+			panic(err)
+		}
+		reader := msgio.NewReader(stream)
+		for {
+			msg, err := reader.ReadMsg()
+			if err != nil {
+				log.Println(err)
+				break
+			}
+			block, err := chain.NewBlock(msg)
+			if err != nil {
+				log.Println(err)
+				break
+			}
+			err = n.chain.Append(block)
+			if err != nil {
+				log.Printf("Block discarded")
+				continue
+			}
+			log.Println("Found block:", hex.EncodeToString(block.Signature))
+		}
+		stream.Close()
 	}
 
 	// Rx messages
@@ -112,7 +154,6 @@ func NewMyChainNode(config *Config) *MyChainNode {
 							continue
 						}
 						log.Printf("Chain size is now: %d", n.chain.Size())
-						pool = append(pool, block)
 					}
 				}
 			} else {
@@ -129,15 +170,14 @@ func NewMyChainNode(config *Config) *MyChainNode {
 				time.Sleep(500 * time.Millisecond)
 				original := make([]*chain.Block, 0, NumBlocks)
 				for numBlocks := 0; numBlocks < NumBlocks; numBlocks++ {
-					blockPool := pool[rand.Intn(len(pool))]
+					blockPool := n.chain.GetOneOfLastBlocksAtRandom(10)
 					original = append(original, blockPool)
 				}
 				nextBlock, err := n.chain.NewBlockFromBlocks(original, []byte("payload"), n.account)
 				if err != nil {
 					panic(err)
 				}
-				pool = append(pool, nextBlock)
-				log.Printf("Block: %s, #%d", nextBlock.String(), len(pool))
+				log.Printf("Block: %s, #%d", nextBlock.String(), n.chain.Size())
 				data, err := nextBlock.Serialize()
 				if err != nil {
 					panic(err)
@@ -167,9 +207,13 @@ func main() {
 
 	// log.Println(hex.EncodeToString(data))
 
-	log.Println("Il you want to join:")
+	log.Println("If want to join:")
 	for _, addr := range node.node.Addresses() {
 		log.Printf("go run cmd/node/main.go -peers %s -genesys %s -spammer true", addr, hex.EncodeToString(data))
+	}
+
+	for _, addr := range node.node.Addresses() {
+		log.Printf("I'm %s", addr)
 	}
 
 	select {}
