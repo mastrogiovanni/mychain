@@ -18,13 +18,24 @@ type Chain struct {
 	blocks  map[string]*Block
 }
 
-func NewChain(acc account.Account) *Chain {
-
-	genesisMessage := []byte("Hello World!")
-
+func NewChain(acc account.Account, genesys []byte) *Chain {
+	genesysBlock := newGenesysBlock(acc, genesys)
 	chain := &Chain{
-		blocks: make(map[string]*Block),
-		genesys: &Block{
+		blocks:  make(map[string]*Block),
+		genesys: genesysBlock,
+	}
+	chain.blocks[string(chain.genesys.Signature)] = chain.genesys
+	return chain
+}
+
+func newGenesysBlock(acc account.Account, genesys []byte) *Block {
+	if genesys != nil {
+		genesysBlock := &Block{}
+		genesysBlock.Deserialize(genesys)
+		return genesysBlock
+	} else {
+		genesisMessage := []byte("Hello World!")
+		genesysBlock := &Block{
 			PrevBlockIds: make([][]byte, 0),
 			Sequence:     0,
 			Payload:      genesisMessage,
@@ -33,15 +44,9 @@ func NewChain(acc account.Account) *Chain {
 				Type:      acc.Type(),
 				PublicKey: acc.PublicKey(),
 			},
-		},
+		}
+		return genesysBlock
 	}
-
-	chain.blocks[string(chain.genesys.Signature)] = chain.genesys
-	return chain
-}
-
-func CreateGenesys() {
-
 }
 
 func (c *Chain) Blocks() []*Block {
@@ -98,6 +103,22 @@ func (c *Chain) NewBlock(prevBlockIds [][]byte, payload []byte, acc account.Acco
 	}
 	c.blocks[string(signature)] = block
 	return block, nil
+}
+
+func (c *Chain) Size() int {
+	return len(c.blocks)
+}
+
+func (c *Chain) Append(block *Block) error {
+	ok, err := c.Verify(block)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("block not signed correctly")
+	}
+	c.blocks[string(block.Signature)] = block
+	return nil
 }
 
 func (c *Chain) Verify(block *Block) (bool, error) {
