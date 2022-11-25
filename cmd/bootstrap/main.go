@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/libp2p/go-libp2p"
+	"github.com/libp2p/go-libp2p-core/event"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	ma "github.com/multiformats/go-multiaddr"
@@ -67,6 +68,17 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
+	sub, err := host.EventBus().Subscribe(event.WildcardSubscription)
+	if err != nil {
+		panic(err)
+	}
+	go func() {
+		defer sub.Close()
+		for e := range sub.Out() {
+			fmt.Printf("%+v\n", e)
+		}
+	}()
 
 	_, err = relay.New(host, relay.WithACL(t))
 	if err != nil {
