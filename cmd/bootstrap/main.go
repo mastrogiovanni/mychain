@@ -44,7 +44,7 @@ func main() {
 		libp2p.ListenAddrStrings("/ip4/0.0.0.0/tcp/0"),
 		libp2p.Identity(prvKey),
 		libp2p.EnableRelay(),
-		// libp2p.EnableHolePunching(holepunch.WithTracer(t)),
+		libp2p.EnableHolePunching(holepunch.WithTracer(t)),
 	)
 	if err != nil {
 		panic(err)
