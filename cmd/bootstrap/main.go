@@ -3,11 +3,11 @@ package main
 import (
 	"flag"
 	"fmt"
-	"log"
 	mrand "math/rand"
 	"os"
 	"strings"
 
+	"github.com/ipfs/go-log/v2"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p-core/event"
 	"github.com/libp2p/go-libp2p-core/peer"
@@ -39,6 +39,8 @@ func (tracer) AllowConnect(src peer.ID, srcAddr ma.Multiaddr, dest peer.ID) bool
 }
 
 func main() {
+
+	log.SetAllLoggers(log.LevelDebug)
 
 	help := flag.Bool("help", false, "Display Help")
 
@@ -82,7 +84,7 @@ func main() {
 
 	_, err = relay.New(host, relay.WithACL(t))
 	if err != nil {
-		log.Printf("Failed to instantiate the relay: %v", err)
+		fmt.Printf("Failed to instantiate the relay: %v", err)
 		panic(err)
 	}
 
