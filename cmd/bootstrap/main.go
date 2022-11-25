@@ -3,7 +3,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"log"
 	mrand "math/rand"
 	"os"
 	"strings"
@@ -11,7 +10,6 @@ import (
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/crypto"
 
-	"github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/relay"
 	"github.com/libp2p/go-libp2p/p2p/protocol/holepunch"
 )
 
@@ -45,17 +43,18 @@ func main() {
 	host, err := libp2p.New(
 		libp2p.ListenAddrStrings("/ip4/0.0.0.0/tcp/0"),
 		libp2p.Identity(prvKey),
-		libp2p.EnableRelay(),
+		// libp2p.EnableRelay(),
 		libp2p.EnableHolePunching(holepunch.WithTracer(t)),
 	)
 	if err != nil {
 		panic(err)
 	}
-	_, err = relay.New(host)
-	if err != nil {
-		log.Printf("Failed to instantiate the relay: %v", err)
-		panic(err)
-	}
+
+	// _, err = relay.New(host)
+	// if err != nil {
+	// 	log.Printf("Failed to instantiate the relay: %v", err)
+	// 	panic(err)
+	// }
 
 	for _, addr := range host.Addrs() {
 		if !strings.Contains(addr.String(), "127.0.0.1") {
