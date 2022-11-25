@@ -3,13 +3,17 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log"
 	mrand "math/rand"
 	"os"
 	"strings"
 
 	"github.com/libp2p/go-libp2p"
+	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p/core/crypto"
+	ma "github.com/multiformats/go-multiaddr"
 
+	"github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/relay"
 	"github.com/libp2p/go-libp2p/p2p/protocol/holepunch"
 )
 
@@ -17,6 +21,20 @@ type tracer struct{}
 
 func (tracer) Trace(evt *holepunch.Event) {
 	fmt.Printf("%+v\n", evt)
+}
+
+// AllowReserve returns true if a reservation from a peer with the given peer ID and multiaddr
+// is allowed.
+func (tracer) AllowReserve(p peer.ID, a ma.Multiaddr) bool {
+	fmt.Printf("AllowReserve %s, %+v\n", p, a)
+	return true
+}
+
+// AllowConnect returns true if a source peer, with a given multiaddr is allowed to connect
+// to a destination peer.
+func (tracer) AllowConnect(src peer.ID, srcAddr ma.Multiaddr, dest peer.ID) bool {
+	fmt.Printf("AllowReserve src: %s, srcAddr: %+v, dest: %s\n", src, srcAddr, dest)
+	return true
 }
 
 func main() {
@@ -43,18 +61,18 @@ func main() {
 	host, err := libp2p.New(
 		libp2p.ListenAddrStrings("/ip4/0.0.0.0/tcp/0"),
 		libp2p.Identity(prvKey),
-		libp2p.EnableRelay(),
+		// libp2p.EnableRelay(),
 		libp2p.EnableHolePunching(holepunch.WithTracer(t)),
 	)
 	if err != nil {
 		panic(err)
 	}
 
-	// _, err = relay.New(host)
-	// if err != nil {
-	// 	log.Printf("Failed to instantiate the relay: %v", err)
-	// 	panic(err)
-	// }
+	_, err = relay.New(host, relay.WithACL(t))
+	if err != nil {
+		log.Printf("Failed to instantiate the relay: %v", err)
+		panic(err)
+	}
 
 	for _, addr := range host.Addrs() {
 		if !strings.Contains(addr.String(), "127.0.0.1") {
