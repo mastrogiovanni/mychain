@@ -39,7 +39,7 @@ func main() {
 		panic(err)
 	}
 
-	// t := tracer{}
+	t := tracer{}
 	host, err := libp2p.New(
 		libp2p.ListenAddrStrings("/ip4/0.0.0.0/tcp/0"),
 		libp2p.Identity(prvKey),
