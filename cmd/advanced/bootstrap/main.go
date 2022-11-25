@@ -12,8 +12,10 @@ import (
 	"github.com/libp2p/go-libp2p-core/event"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p/core/crypto"
+	"github.com/libp2p/go-libp2p/core/network"
 	ma "github.com/multiformats/go-multiaddr"
 
+	"github.com/libp2p/go-libp2p/p2p/host/autonat"
 	"github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/relay"
 	"github.com/libp2p/go-libp2p/p2p/protocol/holepunch"
 )
@@ -66,6 +68,13 @@ func main() {
 		libp2p.Identity(prvKey),
 		// libp2p.EnableRelay(),
 		libp2p.EnableHolePunching(holepunch.WithTracer(t)),
+	)
+	if err != nil {
+		panic(err)
+	}
+
+	_, err = autonat.New(host,
+		autonat.WithReachability(network.ReachabilityPublic),
 	)
 	if err != nil {
 		panic(err)
