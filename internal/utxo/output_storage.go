@@ -24,7 +24,7 @@ func (storage *OutputStorage) String() string {
 	return buffer.String()
 }
 
-func (storage *OutputStorage) Add(output *Output) error {
+func (storage *OutputStorage) AddOutput(output *Output) error {
 	err := output.Verify()
 	if err != nil {
 		return err
@@ -33,43 +33,10 @@ func (storage *OutputStorage) Add(output *Output) error {
 	return nil
 }
 
-func (storage *OutputStorage) findOutputFromTransaction(transaction *Transaction) ([]*Output, error) {
-	outputs := make([]*Output, 0)
-	for _, input := range transaction.Inputs {
-		output, ok := storage.Outputs[input.ID]
-		if !ok {
-			return nil, fmt.Errorf("output not found %s", input.ID)
-		}
-		outputs = append(outputs, output)
+func (storage *OutputStorage) FindOutputFromInput(input *Input) (*Output, error) {
+	output, ok := storage.Outputs[input.ID]
+	if !ok {
+		return nil, fmt.Errorf("output not found %s", input.ID)
 	}
-	return outputs, nil
-}
-
-func (storage *OutputStorage) Submit(transaction *Transaction) error {
-
-	// Retrieve output from database
-	outputs, err := storage.findOutputFromTransaction(transaction)
-	if err != nil {
-		return err
-	}
-
-	// Verify each output
-	for _, output := range transaction.Outputs {
-		err := output.Verify()
-		if err != nil {
-			return err
-		}
-	}
-
-	// Consume outputs
-	for _, output := range outputs {
-		delete(storage.Outputs, output.ID)
-	}
-
-	// Insert other Outputs
-	for _, output := range transaction.Outputs {
-		storage.Outputs[output.ID] = output
-	}
-
-	return nil
+	return output, nil
 }

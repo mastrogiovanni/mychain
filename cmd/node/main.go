@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"flag"
+	"fmt"
 	"log"
 	"strings"
 	"time"
@@ -13,6 +14,11 @@ import (
 	"github.com/mastrogiovanni/mychain/internal/account"
 	"github.com/mastrogiovanni/mychain/internal/chain"
 	"github.com/mastrogiovanni/mychain/internal/node"
+	"github.com/mastrogiovanni/mychain/internal/stack"
+)
+
+const (
+	NumTipsBlocks int = 2
 )
 
 type Config struct {
@@ -29,6 +35,7 @@ type MyChainNode struct {
 	node    *node.Node
 	ctx     context.Context
 	cancel  context.CancelFunc
+	layer   *stack.Layer
 }
 
 func NewMyChainNode(config *Config) *MyChainNode {
@@ -70,6 +77,37 @@ func NewMyChainNode(config *Config) *MyChainNode {
 		panic(err)
 	}
 	n.node = node
+
+	currentLayer := stack.NewLayer(func(direction stack.Direction, data []byte, layer *stack.Layer) {
+		if direction == stack.Down {
+			layer.SendDown(data)
+		}
+	})
+
+	lowerLayer := stack.NewLayer(func(direction stack.Direction, data []byte, layer *stack.Layer) {
+		// I'm sending data
+		if direction == stack.Down {
+			original := make([]*chain.Block, 0, NumTipsBlocks)
+			for numBlocks := 0; numBlocks < NumTipsBlocks; numBlocks++ {
+				randomTip := n.chain.GetOneOfLastBlocksAtRandom(10)
+				original = append(original, randomTip)
+			}
+			nextBlock, err := n.chain.NewBlockFromBlocks(original, data, n.account)
+			if err != nil {
+				panic(err)
+			}
+			log.Printf("Block: %s, #%d", nextBlock.String(), n.chain.Size())
+			data, err := nextBlock.Serialize()
+			if err != nil {
+				panic(err)
+			}
+			node.Broadcast(data)
+		}
+	})
+
+	currentLayer.AttachLower(lowerLayer)
+
+	n.layer = currentLayer
 
 	n.node.SetStreamHandler("/snapshot/0.0.1", func(stream network.Stream) {
 		log.Println("Preparing to send snapshot")
@@ -154,6 +192,7 @@ func NewMyChainNode(config *Config) *MyChainNode {
 							continue
 						}
 						log.Printf("Chain size is now: %d", n.chain.Size())
+						n.layer.SendUp(block.Payload)
 					}
 				}
 			} else {
@@ -165,29 +204,18 @@ func NewMyChainNode(config *Config) *MyChainNode {
 	if config.spammer {
 		go func() {
 			log.Println("Starting Spammer")
-			NumBlocks := 2
 			for {
 				time.Sleep(500 * time.Millisecond)
-				original := make([]*chain.Block, 0, NumBlocks)
-				for numBlocks := 0; numBlocks < NumBlocks; numBlocks++ {
-					blockPool := n.chain.GetOneOfLastBlocksAtRandom(10)
-					original = append(original, blockPool)
-				}
-				nextBlock, err := n.chain.NewBlockFromBlocks(original, []byte("payload"), n.account)
-				if err != nil {
-					panic(err)
-				}
-				log.Printf("Block: %s, #%d", nextBlock.String(), n.chain.Size())
-				data, err := nextBlock.Serialize()
-				if err != nil {
-					panic(err)
-				}
-				node.Broadcast(data)
+				n.layer.SendDown([]byte(fmt.Sprintf("msg from: %s", n.node.ID())))
 			}
 		}()
 	}
 
 	return n
+}
+
+func (n *MyChainNode) Layer() *stack.Layer {
+	return n.layer
 }
 
 func parseFlags() *Config {
@@ -205,8 +233,6 @@ func main() {
 	block := node.chain.Genesis()
 	data, _ := block.Serialize()
 
-	// log.Println(hex.EncodeToString(data))
-
 	log.Println("If want to join:")
 	for _, addr := range node.node.Addresses() {
 		log.Printf("go run cmd/node/main.go -peers %s -genesys %s -spammer true", addr, hex.EncodeToString(data))
@@ -215,6 +241,10 @@ func main() {
 	for _, addr := range node.node.Addresses() {
 		log.Printf("I'm %s", addr)
 	}
+
+	node.Layer().AttachUpper(stack.NewLayer(func(direction stack.Direction, data []byte, layer *stack.Layer) {
+		log.Println(direction, string(data))
+	}))
 
 	select {}
 }
