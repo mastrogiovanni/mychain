@@ -10,7 +10,7 @@ import (
 
 type EngineHandlerStub struct{}
 
-func (engine EngineHandlerStub) Validate(input []*Output, output []*Output) error {
+func (engine EngineHandlerStub) Validate(transaction *Transaction, inputs []*Output, outputs []*Output) error {
 	return nil
 }
 

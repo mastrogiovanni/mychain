@@ -35,6 +35,8 @@ func (chain *Chain) appendBlockNoCheck(block *Block) {
 	if !ok {
 		chain.blocks[string(block.Signature)] = block
 		chain.snapshot = append(chain.snapshot, block)
+	} else {
+		panic(fmt.Errorf("found two blocks with same Signature"))
 	}
 }
 
@@ -138,6 +140,10 @@ func (c *Chain) Append(block *Block) error {
 	}
 	if !ok {
 		return fmt.Errorf("block not signed correctly")
+	}
+	// Discard genesys block
+	if bytes.Equal(block.Signature, c.genesys.Signature) {
+		return nil
 	}
 	c.appendBlockNoCheck(block)
 	return nil

@@ -4,9 +4,11 @@ import "fmt"
 
 type EngineHandler interface {
 	// Validate if output to consume and output to insert are sound with respect to the system
-	Validate(input []*Output, output []*Output) error
+	Validate(transaction *Transaction, inputs []*Output, outputs []*Output) error
 	// Request missing inputs. Transaction is provided to enqueue it again for evaluation once Input is retrieved
 	Request(transaction *Transaction, input *Input) (*Output, error)
+	// Transaction is submitted
+	Submitted(inputs []*Output, outputs []*Output)
 }
 
 type Engine struct {
@@ -26,6 +28,15 @@ func (engine *Engine) AddOutput(output *Output) error {
 }
 
 func (engine *Engine) Submit(transaction *Transaction) error {
+
+	// Verify transaction
+	verified, err := transaction.Verify()
+	if err != nil {
+		return err
+	}
+	if !verified {
+		return fmt.Errorf("transaction has wrong signature")
+	}
 
 	// Find existing output from transaction's input
 	outputs := make([]*Output, 0, len(transaction.Inputs))
@@ -51,7 +62,7 @@ func (engine *Engine) Submit(transaction *Transaction) error {
 
 	// Validate transaction:
 	// A criteria could be that sum of outputs must match sum of inputs
-	err := engine.handler.Validate(outputs, transaction.Outputs)
+	err = engine.handler.Validate(transaction, outputs, transaction.Outputs)
 	if err != nil {
 		return err
 	}

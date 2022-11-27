@@ -124,11 +124,6 @@ func (n *Node) Start(parentCtx context.Context, opts ...pubsub.Option) error {
 		return fmt.Errorf("you can specify at most one option")
 	}
 
-	// // setup local mDNS discovery
-	// if err := n.setupDiscovery(); err != nil {
-	// 	panic(err)
-	// }
-
 	n.messages = make(chan *pubsub.Message, NodeMessagesQueueSize)
 
 	topic, err := n.pubSub.Join(n.networkId)
@@ -194,7 +189,6 @@ func (n *Node) readLoop() {
 			continue
 		}
 		// send valid messages onto the Messages channel
-		// log.Printf("Received msg: %+v", cm)
 		n.messages <- msg
 	}
 }
@@ -221,63 +215,8 @@ func (n *Node) Addresses() []string {
 	list := make([]string, 0)
 	for _, addr := range n.host.Addrs() {
 		if !strings.Contains(addr.String(), "127.0.0.1") {
-			// log.Printf("Addr: %s/p2p/%s", addr.String(), n.host.ID().String())
 			list = append(list, fmt.Sprintf("%s/p2p/%s", addr.String(), n.host.ID().String()))
 		}
 	}
 	return list
 }
-
-// func (n *Node) joinChatRoom(ctx context.Context) {
-
-// 	// join the pubsub topic
-// 	topic, err := n.pubSub.Join(n.networkId)
-// 	if err != nil {
-// 		panic(err)
-// 	}
-// 	n.topic = topic
-
-// 	log.Println("Joining network:", n.networkId)
-
-// 	// and subscribe to it
-// 	sub, err := n.topic.Subscribe()
-// 	if err != nil {
-// 		panic(err)
-// 	}
-
-// 	n.subscription = sub
-// 	n.self = n.host.ID()
-
-// 	log.Printf("Host ID: %v", n.self)
-// 	go n.readLoop()
-
-// }
-
-// func (n *Node) HandlePeerFound(pi peer.AddrInfo) {
-// 	log.Printf("discovered new peer %s\n", pi.ID.Pretty())
-// 	err := n.host.Connect(context.Background(), pi)
-// 	if err != nil {
-// 		fmt.Printf("error connecting to peer %s: %s\n", pi.ID.Pretty(), err)
-// 	}
-// }
-
-// // setupDiscovery creates an mDNS discovery service and attaches it to the libp2p Host.
-// // This lets us automatically discover peers on the same LAN and connect to them.
-// func (n *Node) setupDiscovery() error {
-
-// 	ctx := context.Background()
-
-// 	kademliaDHT, err := dht.New(ctx, n.host)
-// 	if err != nil {
-// 		panic(err)
-// 	}
-
-// 	// Bootstrap the DHT. In the default configuration, this spawns a Background
-// 	// thread that will refresh the peer table every five minutes.
-// 	log.Println("Bootstrapping the DHT")
-// 	return kademliaDHT.Bootstrap(ctx)
-
-// 	// // setup mDNS discovery to find local peers
-// 	// s := mdns.NewMdnsService(n.host, n.networkId, n)
-// 	// return s.Start()
-// }
